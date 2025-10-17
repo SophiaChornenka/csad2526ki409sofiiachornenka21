@@ -162,17 +162,42 @@ if(BUILD_TESTING)
     googletest
     URL https://github.com/google/googletest/archive/refs/tags/release-1.12.1.zip
   )
-  # Prevent GoogleTest from overriding our compiler/linker options
-  set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
+
+  # Prefer shared CRT on MSVC to match project CRT settings (only set on MSVC)
+  if(MSVC)
+    set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
+  endif()
+
   FetchContent_MakeAvailable(googletest)
 
-  # If tests/ contains test_*.cpp files, add them
-  file(GLOB_RECURSE TEST_SOURCES CONFIGURE_DEPENDS ${TESTS_DIR}/test_*.cpp ${TESTS_DIR}/*_test.cpp)
+  # Gather test sources (test_*.cpp and *_test.cpp)
+  file(GLOB_RECURSE TEST_SOURCES CONFIGURE_DEPENDS
+    ${TESTS_DIR}/test_*.cpp
+    ${TESTS_DIR}/*_test.cpp
+  )
+
   if(TEST_SOURCES)
     add_executable(${PROJECT_NAME}_tests ${TEST_SOURCES})
-    target_link_libraries(${PROJECT_NAME}_tests PRIVATE gtest_main ${PROJECT_NAME})
+    # Link against the modern imported target provided by GoogleTest
+    target_link_libraries(${PROJECT_NAME}_tests PRIVATE GTest::gtest_main ${PROJECT_NAME})
     target_include_directories(${PROJECT_NAME}_tests PRIVATE ${SRC_DIR} ${INCLUDE_DIR})
-    add_test(NAME unit_tests COMMAND ${PROJECT_NAME}_tests)
+
+    # Make sure tests are built into a predictable output directory
+    set_target_properties(${PROJECT_NAME}_tests PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tests)
+
+    # Use CTest + GoogleTest integration so individual tests are discovered
+    include(GoogleTest)
+    gtest_discover_tests(${PROJECT_NAME}_tests
+      WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+      PROPERTIES TIMEOUT 10
+    )
+
+    # Convenience target to run all tests with a single target
+    add_custom_target(check
+      COMMAND ${CMAKE_CTEST_COMMAND} --output-on-failure
+      DEPENDS ${PROJECT_NAME}_tests
+      WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+    )
   else()
     message(STATUS "No test sources found in ${TESTS_DIR}. Skipping test target generation.")
   endif()
